@@ -547,13 +547,15 @@ EOF
         
         # Create a temporary script to ensure the correct Ruby version is used
         log "Creating a temporary script to use the correct Ruby version..."
-        cat > /tmp/use_ruby_for_redmine.sh << EOF
+        cat > /home/redmine/use_ruby_for_redmine.sh << EOF
 #!/bin/bash
 source /etc/profile.d/rvm.sh
 rvm use ${RUBY_VERSION} --default
 exec "\$@"
 EOF
-        chmod +x /tmp/use_ruby_for_redmine.sh
+        # Ensure proper permissions
+        chmod 755 /home/redmine/use_ruby_for_redmine.sh
+        chown redmine:redmine /home/redmine/use_ruby_for_redmine.sh
     else
         echo -e "${BLUE}[DRY RUN] Would fix RVM permissions for redmine user${NC}"
     fi
@@ -562,18 +564,19 @@ EOF
     if [ "$DRY_RUN" = false ]; then
         # First verify which Ruby version is being used
         log "Verifying Ruby version for redmine user..."
-        # Create a temporary script to check Ruby version
-        cat > /tmp/check_ruby_version.sh << EOF
+        # Create a temporary script to check Ruby version in redmine's home directory
+        cat > /home/redmine/check_ruby_version.sh << EOF
 #!/bin/bash
 source /etc/profile.d/rvm.sh 2>/dev/null
 rvm use ${RUBY_VERSION} --default 2>/dev/null
 ruby -v
 EOF
-        chmod +x /tmp/check_ruby_version.sh
-        chown redmine:redmine /tmp/check_ruby_version.sh
+        # Ensure proper permissions (root creates it first, then changes ownership)
+        chmod 755 /home/redmine/check_ruby_version.sh
+        chown redmine:redmine /home/redmine/check_ruby_version.sh
         
         # Execute the script as redmine user without piping, using login shell
-        REDMINE_RUBY_VERSION=$(su redmine -c "bash -l -c '/tmp/check_ruby_version.sh'" 2>/dev/null)
+        REDMINE_RUBY_VERSION=$(su redmine -c "bash -l -c '/home/redmine/check_ruby_version.sh'" 2>/dev/null)
         log "Redmine user will use Ruby: $REDMINE_RUBY_VERSION"
         
         # Install bundler with the correct Ruby version
