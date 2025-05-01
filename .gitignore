@@ -1,0 +1,61 @@
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Icon?
+ehthumbs.db
+Thumbs.db
+
+# Editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment configuration
+.env
+*.env
+.env.*
+!.env.example
+
+# Credentials and sensitive information
+*.pem
+*.key
+*.crt
+*.csr
+*.cert
+
+# Log files
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+.tmp
+
+# Backup files
+*~
+*.bak
+*.backup
+
+# Install artifacts
+*.zip
+*.gz
+*.tar
+*.rar
+
+# Ruby specific
+.bundle/
+vendor/bundle/
+.ruby-version
+.ruby-gemset
+
+# Redmine specific
+config/configuration.yml
+config/database.yml
+config/email.yml
+config/secrets.yml
