@@ -22,7 +22,7 @@ NC='\033[0m' # No Color
 DOMAIN=""
 DB_PASSWORD=""
 REDMINE_VERSION="6.0.5"
-RUBY_VERSION="3.3.8"
+RUBY_VERSION="3.2.2"
 # Ruby version must be compatible with Redmine requirements (>=3.1.0,<3.4.0)
 EMAIL=""
 DRY_RUN=false
@@ -416,6 +416,9 @@ install_redmine() {
     local redmine_dir="/home/redmine"
     local redmine_app_dir="${redmine_dir}/redmine"
     
+    # Initialize goto_gem_installation variable
+    goto_gem_installation=false
+    
     # Check if Redmine is already installed
     if [ "$DRY_RUN" = false ]; then
         if [ -d "${redmine_app_dir}" ] && [ -f "${redmine_app_dir}/config/database.yml" ]; then
@@ -559,7 +562,18 @@ EOF
     if [ "$DRY_RUN" = false ]; then
         # First verify which Ruby version is being used
         log "Verifying Ruby version for redmine user..."
-        REDMINE_RUBY_VERSION=$(su redmine -c "bash -l -c 'source /etc/profile.d/rvm.sh 2>/dev/null && rvm use ${RUBY_VERSION} --default 2>/dev/null && ruby -v'" | head -n 1)
+        # Create a temporary script to check Ruby version
+        cat > /tmp/check_ruby_version.sh << EOF
+#!/bin/bash
+source /etc/profile.d/rvm.sh 2>/dev/null
+rvm use ${RUBY_VERSION} --default 2>/dev/null
+ruby -v
+EOF
+        chmod +x /tmp/check_ruby_version.sh
+        chown redmine:redmine /tmp/check_ruby_version.sh
+        
+        # Execute the script as redmine user without piping, using login shell
+        REDMINE_RUBY_VERSION=$(su redmine -c "bash -l -c '/tmp/check_ruby_version.sh'" 2>/dev/null)
         log "Redmine user will use Ruby: $REDMINE_RUBY_VERSION"
         
         # Install bundler with the correct Ruby version
