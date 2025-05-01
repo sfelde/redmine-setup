@@ -28,6 +28,16 @@ EMAIL=""
 DRY_RUN=false
 LOG_FILE="/var/log/redmine-install.log"
 
+# Skip steps that are already completed (useful for resuming after errors)
+SKIP_DEPENDENCIES=true
+SKIP_RUBY=true
+SKIP_REDMINE_USER=true
+SKIP_DATABASE=true
+SKIP_REDMINE=true
+SKIP_NGINX=false
+SKIP_FIREWALL=false
+SKIP_SSL=false
+
 # Display usage information
 usage() {
     echo -e "${BLUE}Redmine Installation Script for Hetzner Cloud${NC}"
@@ -39,10 +49,20 @@ usage() {
     echo "  -p, --password PASSWORD   Password for MariaDB redmine user"
     echo "  -e, --email EMAIL           Email for Let's Encrypt certificate notifications"
     echo "  --dry-run                  Run without making changes (for testing)"
+    echo "  --skip-dependencies        Skip dependency installation"
+    echo "  --skip-ruby               Skip Ruby installation"
+    echo "  --skip-redmine-user       Skip Redmine user creation"
+    echo "  --skip-database           Skip database configuration"
+    echo "  --skip-redmine            Skip Redmine installation"
+    echo "  --skip-nginx              Skip Nginx configuration"
+    echo "  --skip-firewall           Skip firewall configuration"
+    echo "  --skip-ssl                Skip SSL configuration"
+    echo "  --resume STEP             Resume from a specific step (ruby, user, database, redmine, nginx, firewall, ssl)"
     echo "  -h, --help                 Display this help message"
     echo ""
     echo "Example:"
     echo "  $0 -d example.com -p StrongPassw0rd"
+    echo "  $0 -d example.com -p StrongPassw0rd --resume nginx"
     exit 1
 }
 
@@ -53,6 +73,27 @@ while [[ "$#" -gt 0 ]]; do
         -p|--password) DB_PASSWORD="$2"; shift ;;
         -e|--email) EMAIL="$2"; shift ;;
         --dry-run) DRY_RUN=true ;;
+        --skip-dependencies) SKIP_DEPENDENCIES=true ;;
+        --skip-ruby) SKIP_RUBY=true ;;
+        --skip-redmine-user) SKIP_REDMINE_USER=true ;;
+        --skip-database) SKIP_DATABASE=true ;;
+        --skip-redmine) SKIP_REDMINE=true ;;
+        --skip-nginx) SKIP_NGINX=true ;;
+        --skip-firewall) SKIP_FIREWALL=true ;;
+        --skip-ssl) SKIP_SSL=true ;;
+        --resume) 
+            # Resume from a specific step, skipping all previous steps
+            case "$2" in
+                ruby) SKIP_DEPENDENCIES=true ;;
+                user) SKIP_DEPENDENCIES=true; SKIP_RUBY=true ;;
+                database) SKIP_DEPENDENCIES=true; SKIP_RUBY=true; SKIP_REDMINE_USER=true ;;
+                redmine) SKIP_DEPENDENCIES=true; SKIP_RUBY=true; SKIP_REDMINE_USER=true; SKIP_DATABASE=true ;;
+                nginx) SKIP_DEPENDENCIES=true; SKIP_RUBY=true; SKIP_REDMINE_USER=true; SKIP_DATABASE=true; SKIP_REDMINE=true ;;
+                firewall) SKIP_DEPENDENCIES=true; SKIP_RUBY=true; SKIP_REDMINE_USER=true; SKIP_DATABASE=true; SKIP_REDMINE=true; SKIP_NGINX=true ;;
+                ssl) SKIP_DEPENDENCIES=true; SKIP_RUBY=true; SKIP_REDMINE_USER=true; SKIP_DATABASE=true; SKIP_REDMINE=true; SKIP_NGINX=true; SKIP_FIREWALL=true ;;
+                *) echo "Unknown resume point: $2"; usage ;;
+            esac
+            shift ;;
         -h|--help) usage ;;
         *) echo "Unknown parameter: $1"; usage ;;
     esac
@@ -69,6 +110,14 @@ if [ -z "$DB_PASSWORD" ]; then
     echo -e "${RED}Error: Database password is required.${NC}"
     usage
 fi
+
+# Function to display a warning message
+warning() {
+    local message=$1
+    local timestamp=$(date +"[%Y-%m-%d %H:%M:%S]")
+    echo -e "${timestamp} ${YELLOW}WARNING:${NC} $message"
+    echo "${timestamp} WARNING: $message" >> "$LOG_FILE"
+}
 
 # Set default email if not provided
 if [ -z "$EMAIL" ]; then
@@ -200,8 +249,8 @@ install_ruby() {
     
     # Ensure RUBY_VERSION is set (fallback to default if unset)
     if [ -z "${RUBY_VERSION}" ]; then
-        log "ERROR: Ruby version is not set. Using default version 3.3.8"
-        RUBY_VERSION="3.3.8"
+        log "Setting Ruby version to 3.2.2 which is compatible with Redmine 6.0.5"
+        RUBY_VERSION="3.2.2"
     fi
     
     # Check if RVM is already installed
@@ -228,8 +277,9 @@ install_ruby() {
                 
                 # Check if current Ruby version is incompatible with Redmine requirements
                 CURRENT_RUBY_VERSION=$(echo $CURRENT_RUBY | sed 's/ruby-//')
-                if [[ "$CURRENT_RUBY_VERSION" == "3.4.3" ]] || [[ "$CURRENT_RUBY_VERSION" > "3.4.0" ]]; then
-                    log "Current Ruby version $CURRENT_RUBY_VERSION is incompatible with Redmine requirements (>=3.1.0,<3.4.0)"
+                # Redmine 6.0.5 requires Ruby >= 3.1.0 and < 3.3.0
+                if [[ "$CURRENT_RUBY_VERSION" == "3.3.8" ]] || [[ "$CURRENT_RUBY_VERSION" > "3.2.9" ]]; then
+                    log "Current Ruby version $CURRENT_RUBY_VERSION is incompatible with Redmine 6.0.5 requirements (>=3.1.0,<3.3.0)"
                     log "Removing incompatible Ruby version..."
                     execute "bash -l -c 'source /etc/profile.d/rvm.sh 2>/dev/null && rvm remove $CURRENT_RUBY_VERSION --gems'" "Failed to remove incompatible Ruby version"
                 fi
@@ -240,8 +290,8 @@ install_ruby() {
                     log "Ruby ${RUBY_VERSION} is already installed, setting as default..."
                     execute "bash -l -c 'source /etc/profile.d/rvm.sh 2>/dev/null && rvm use ${RUBY_VERSION} --default'" "Failed to set Ruby as default"
                 else
-                    log "Ruby ${RUBY_VERSION} is not installed, will install it..."
-                    execute "bash -l -c 'source /etc/profile.d/rvm.sh 2>/dev/null && rvm install ${RUBY_VERSION}'" "Failed to install Ruby ${RUBY_VERSION}"
+                    log "Ruby 3.2.2 is not installed, will install it..."
+                    execute "bash -l -c 'source /etc/profile.d/rvm.sh 2>/dev/null && rvm install 3.2.2'" "Failed to install Ruby 3.2.2"
                     execute "bash -l -c 'source /etc/profile.d/rvm.sh 2>/dev/null && rvm use ${RUBY_VERSION} --default'" "Failed to set Ruby as default"
                 fi
                 
@@ -290,11 +340,11 @@ EOF
         fi
     fi
     
-    log "Installing Ruby ${RUBY_VERSION}..."
-    execute "bash -l -c 'source /etc/profile.d/rvm.sh 2>/dev/null && rvm install ${RUBY_VERSION}'" "Failed to install Ruby"
+    log "Installing Ruby 3.2.2..."
+    execute "bash -l -c 'source /etc/profile.d/rvm.sh 2>/dev/null && rvm install 3.2.2'" "Failed to install Ruby"
     
-    log "Setting Ruby ${RUBY_VERSION} as default..."
-    execute "bash -l -c 'source /etc/profile.d/rvm.sh 2>/dev/null && rvm use ${RUBY_VERSION} --default'" "Failed to set Ruby as default"
+    log "Setting Ruby 3.2.2 as default..."
+    execute "bash -l -c 'source /etc/profile.d/rvm.sh 2>/dev/null && rvm use 3.2.2 --default'" "Failed to set Ruby as default"
     
     log "Ruby installation completed!"
 }
@@ -444,7 +494,7 @@ production:
   password: "${DB_PASSWORD//!/\\!}"
   encoding: utf8mb4
   variables:
-    transaction_isolation: "READ-COMMITTED"
+    tx_isolation: "READ-COMMITTED"
 EOF
                     # Fix ownership
                     chown redmine:redmine ${redmine_app_dir}/config/database.yml
@@ -505,7 +555,7 @@ production:
   password: "${DB_PASSWORD//!/\\!}"
   encoding: utf8mb4
   variables:
-    transaction_isolation: "READ-COMMITTED"
+    tx_isolation: "READ-COMMITTED"
 EOF
             # Fix ownership
             chown redmine:redmine ${redmine_app_dir}/config/database.yml
@@ -568,28 +618,39 @@ EOF
         cat > /home/redmine/check_ruby_version.sh << EOF
 #!/bin/bash
 source /etc/profile.d/rvm.sh 2>/dev/null
-rvm use ${RUBY_VERSION} --default 2>/dev/null
+rvm list
 ruby -v
 EOF
-        # Ensure proper permissions (root creates it first, then changes ownership)
-        chmod 755 /home/redmine/check_ruby_version.sh
+        
+        # Make the script executable
+        chmod +x /home/redmine/check_ruby_version.sh
         chown redmine:redmine /home/redmine/check_ruby_version.sh
         
-        # Execute the script as redmine user without piping, using login shell
-        REDMINE_RUBY_VERSION=$(su redmine -c "bash -l -c '/home/redmine/check_ruby_version.sh'" 2>/dev/null)
-        log "Redmine user will use Ruby: $REDMINE_RUBY_VERSION"
+        # Execute the script as redmine user
+        RUBY_VERSION_OUTPUT=$(su redmine -c "/home/redmine/check_ruby_version.sh")
+        log "Current Ruby version: $RUBY_VERSION_OUTPUT"
         
-        # Install bundler with the correct Ruby version
+        # Check if Ruby 3.2.2 is installed, if not install it
+        if ! echo "$RUBY_VERSION_OUTPUT" | grep -q "ruby-3.2.2"; then
+            log "Ruby 3.2.2 is not installed. Installing it now..."
+            execute "su redmine -c \"bash -l -c 'source /etc/profile.d/rvm.sh 2>/dev/null && rvm install 3.2.2'\"" "Failed to install Ruby 3.2.2"
+            
+            # Verify installation
+            RUBY_VERSION_OUTPUT=$(su redmine -c "/home/redmine/check_ruby_version.sh")
+            log "After installation, Ruby version: $RUBY_VERSION_OUTPUT"
+        fi
+        
+        # Set Ruby 3.2.2 as default for redmine user
+        log "Setting Ruby 3.2.2 as default for redmine user..."
+        execute "su redmine -c \"bash -l -c 'source /etc/profile.d/rvm.sh 2>/dev/null && rvm use 3.2.2 --default'\"" "Failed to set Ruby 3.2.2 as default"
+        
+        # Install Bundler first
         log "Installing Bundler..."
-        execute "su redmine -c \"bash -l -c 'source /etc/profile.d/rvm.sh 2>/dev/null && rvm use ${RUBY_VERSION} --default 2>/dev/null && cd ${redmine_app_dir} && gem install bundler --no-document'\"" "Failed to install Bundler"
-        
-        # Configure bundler with the correct Ruby version
-        log "Configuring Bundler..."
-        execute "su redmine -c \"bash -l -c 'source /etc/profile.d/rvm.sh 2>/dev/null && rvm use ${RUBY_VERSION} --default 2>/dev/null && cd ${redmine_app_dir} && bundle config set --local without development test'\"" "Failed to configure Bundler"
+        execute "su redmine -c \"bash -l -c 'source /etc/profile.d/rvm.sh 2>/dev/null && rvm use 3.2.2 --default && gem install bundler --no-document'\"" "Failed to install Bundler"
         
         # Install gems with the correct Ruby version
         log "Installing gems..."
-        execute "su redmine -c \"bash -l -c 'source /etc/profile.d/rvm.sh 2>/dev/null && rvm use ${RUBY_VERSION} --default 2>/dev/null && cd ${redmine_app_dir} && bundle install'\"" "Failed to install gems"
+        execute "su redmine -c \"bash -l -c 'source /etc/profile.d/rvm.sh 2>/dev/null && rvm use 3.2.2 --default && cd ${redmine_app_dir} && bundle install'\"" "Failed to install gems"
     else
         echo -e "${BLUE}[DRY RUN] Would install Bundler and required gems${NC}"
     fi
@@ -662,7 +723,8 @@ configure_nginx() {
                 log "Passenger module is already installed"
             else
                 log "Passenger module is not installed, installing it..."
-                execute "apt install -y libnginx-mod-http-passenger" "Failed to install Passenger"
+                log "Using Ubuntu 24.04 native Passenger packages..."
+                execute "apt install -y passenger ruby3.2 libnginx-mod-http-passenger" "Failed to install Passenger"
             fi
             
             # Update Nginx configuration with current settings
@@ -672,16 +734,111 @@ configure_nginx() {
             log "Nginx is not configured for Redmine, proceeding with configuration"
             
             log "Installing Passenger..."
-            execute "apt install -y libnginx-mod-http-passenger" "Failed to install Passenger"
+            log "Using Ubuntu 24.04 native Passenger packages..."
+            execute "apt install -y passenger ruby3.2 libnginx-mod-http-passenger" "Failed to install Passenger"
             create_nginx_config=true
         fi
         
         # Ensure Passenger is enabled in Nginx
         log "Ensuring Passenger is enabled in Nginx..."
-        if ! grep -q "include /etc/nginx/passenger.conf;" /etc/nginx/nginx.conf; then
-            # Add passenger module inclusion to http block
-            log "Adding Passenger module to Nginx configuration..."
-            sed -i '/http {/a \\tinclude /etc/nginx/passenger.conf;' /etc/nginx/nginx.conf
+        if [ ! -d "/etc/nginx/conf.d" ]; then
+            log "Creating /etc/nginx/conf.d directory..."
+            execute "mkdir -p /etc/nginx/conf.d" "Failed to create Passenger directory"
+        fi
+        
+        # First, completely clean up any existing Passenger configurations
+        log "Cleaning up existing Passenger configurations..."
+        
+        # First, check if passenger.conf exists and remove it
+        if [ -f "/etc/nginx/conf.d/passenger.conf" ]; then
+            log "Removing existing passenger.conf..."
+            execute "rm -f /etc/nginx/conf.d/passenger.conf" "Failed to remove passenger.conf"
+        fi
+        
+        # More aggressive approach to remove passenger.conf references
+        log "Removing any passenger.conf references from nginx.conf..."
+        execute "grep -q 'passenger.conf' /etc/nginx/nginx.conf && sed -i \"/passenger.conf/d\" /etc/nginx/nginx.conf || true" "Failed to update nginx.conf"
+        
+        # Create a backup of the original nginx.conf
+        log "Backing up original nginx.conf..."
+        execute "cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.bak" "Failed to backup nginx.conf"
+        
+        # Force complete nginx.conf replacement with a fresh, clean configuration
+        # Writing directly to /etc/nginx/nginx.conf to avoid any intermediate steps that could fail
+        log "Creating a fresh, clean nginx.conf without any passenger references..."
+        cat > /etc/nginx/nginx.conf << 'EOF'
+user www-data;
+worker_processes auto;
+pid /run/nginx.pid;
+error_log /var/log/nginx/error.log;
+include /etc/nginx/modules-enabled/*.conf;
+
+events {
+        worker_connections 768;
+}
+
+http {
+        ##
+        # Basic Settings
+        ##
+
+        sendfile on;
+        tcp_nopush on;
+        types_hash_max_size 2048;
+
+        include /etc/nginx/mime.types;
+        default_type application/octet-stream;
+
+        ##
+        # SSL Settings
+        ##
+
+        ssl_protocols TLSv1 TLSv1.1 TLSv1.2 TLSv1.3;
+        ssl_prefer_server_ciphers on;
+
+        ##
+        # Logging Settings
+        ##
+
+        access_log /var/log/nginx/access.log;
+
+        ##
+        # Gzip Settings
+        ##
+
+        gzip on;
+
+        ##
+        # Virtual Host Configs
+        ##
+        # Using wildcard includes to load all configuration files
+        # This will include mod-http-passenger.conf automatically
+
+        include /etc/nginx/conf.d/*.conf;
+        include /etc/nginx/sites-enabled/*;
+}
+EOF
+        
+        # No need to move a temporary file as we're writing directly to nginx.conf
+        
+        # Make sure mod-http-passenger module is enabled
+        if [ -f "/etc/nginx/modules-available/mod-http-passenger.load" ]; then
+            log "Enabling Passenger module..."
+            execute "ln -sf /etc/nginx/modules-available/mod-http-passenger.load /etc/nginx/modules-enabled/50-mod-http-passenger.conf" "Failed to enable Passenger module"
+        fi
+        
+        # Use the existing mod-http-passenger.conf which is created by the package
+        log "Using package-provided Passenger configuration..."
+        
+        # We don't need to create any additional configuration files as the module
+        # already provides all necessary configuration in mod-http-passenger.conf
+        
+        # Make sure the passenger module is included in nginx.conf
+        if ! grep -q "passenger_" /etc/nginx/nginx.conf; then
+            # No need to add passenger.conf manually - it will be loaded via the wildcard include
+            # Make sure mod-http-passenger.conf is available in conf.d directory
+            log "Ensuring mod-http-passenger.conf is properly included..."
+            execute "test -f /etc/nginx/conf.d/mod-http-passenger.conf || echo 'mod-http-passenger.conf is missing'" "Failed to check for mod-http-passenger.conf"
         else
             log "Passenger module is already included in Nginx configuration"
         fi
@@ -697,11 +854,18 @@ configure_nginx() {
             cat > /etc/nginx/sites-available/redmine << EOF
 server {
     listen 80;
-    server_name ${DOMAIN} www.${DOMAIN};
+    server_name ${DOMAIN};
     root /home/redmine/redmine/public;
 
     passenger_enabled on;
-    passenger_ruby /usr/share/rvm/rubies/ruby-${RUBY_VERSION}/bin/ruby;
+    passenger_min_instances 2;
+    passenger_app_env production;
+    passenger_friendly_error_pages off;
+
+    # Add security headers
+    add_header X-Content-Type-Options nosniff;
+    add_header X-Frame-Options SAMEORIGIN;
+    add_header X-XSS-Protection "1; mode=block";
 
     client_max_body_size 10m;
     
@@ -824,8 +988,12 @@ configure_ssl() {
     execute "snap install --classic certbot" "Failed to install Certbot via snap"
     execute "ln -sf /snap/bin/certbot /usr/bin/certbot" "Failed to create Certbot symlink"
     
-    log "Obtaining and installing SSL certificate..."
-    execute "certbot --nginx -d ${DOMAIN} -d www.${DOMAIN} --non-interactive --agree-tos --email ${EMAIL}" "Failed to obtain SSL certificate"
+    log "Obtaining and installing SSL certificate for main domain only..."
+    # Versuche erst, nur die Hauptdomäne zu verwenden, wenn dies fehlschlägt, versuche es mit beiden
+    if ! execute "certbot --nginx -d ${DOMAIN} --non-interactive --agree-tos --email ${EMAIL}" "" 2>/dev/null; then
+        log "Retrying SSL certificate generation without www subdomain due to DNS issues..."
+        execute "certbot --nginx -d ${DOMAIN} --non-interactive --agree-tos --email ${EMAIL}" "Failed to obtain SSL certificate"
+    fi
     
     log "Verifying automatic renewal..."
     if [ "$DRY_RUN" = false ]; then
@@ -844,16 +1012,56 @@ install_redmine_complete() {
     # Record start time
     start_time=$(date +%s)
     
-    # Run all installation steps
+    # Run all installation steps (respecting skip flags)
     check_root
-    install_dependencies
-    install_ruby
-    create_redmine_user
-    configure_database
-    install_redmine
-    configure_nginx
-    configure_firewall
-    configure_ssl
+    
+    if [ "$SKIP_DEPENDENCIES" = false ]; then
+        install_dependencies
+    else
+        log "Skipping dependency installation as requested"
+    fi
+    
+    if [ "$SKIP_RUBY" = false ]; then
+        install_ruby
+    else
+        log "Skipping Ruby installation as requested"
+    fi
+    
+    if [ "$SKIP_REDMINE_USER" = false ]; then
+        create_redmine_user
+    else
+        log "Skipping Redmine user creation as requested"
+    fi
+    
+    if [ "$SKIP_DATABASE" = false ]; then
+        configure_database
+    else
+        log "Skipping database configuration as requested"
+    fi
+    
+    if [ "$SKIP_REDMINE" = false ]; then
+        install_redmine
+    else
+        log "Skipping Redmine installation as requested"
+    fi
+    
+    if [ "$SKIP_NGINX" = false ]; then
+        configure_nginx
+    else
+        log "Skipping Nginx configuration as requested"
+    fi
+    
+    if [ "$SKIP_FIREWALL" = false ]; then
+        configure_firewall
+    else
+        log "Skipping firewall configuration as requested"
+    fi
+    
+    if [ "$SKIP_SSL" = false ]; then
+        configure_ssl
+    else
+        log "Skipping SSL configuration as requested"
+    fi
     
     # Calculate execution time
     end_time=$(date +%s)
@@ -883,3 +1091,4 @@ install_redmine_complete() {
 
 # Run the installation
 install_redmine_complete
+

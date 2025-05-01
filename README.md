@@ -60,6 +60,32 @@ If you encounter issues during installation:
 2. Verify that your domain is correctly pointing to your server's IP address
 3. Ensure that ports 80 and 443 are open on your server
 
+## Theme Installation for Redmine 6.0+
+**Important Note**: Redmine 6.0+ has changed the way themes are handled.
+
+### Theme Directory Changes
+- In Redmine versions 5 and below: Themes were installed to `/public/themes/`
+- In Redmine versions 6.0+: Themes must be installed to `/themes/`
+
+### Required Nginx Configuration
+For themes to work correctly in Redmine 6.0+, you must add the following to your Nginx server block:
+
+```nginx
+# Theme assets alias - required for Redmine 6.0+
+location /public/assets/themes {
+    alias /home/redmine/redmine/themes;
+    autoindex off;
+}
+```
+
+This configuration is already included in the installation script, but if you're upgrading from an earlier version or using a custom Nginx configuration, you'll need to add this manually.
+
+### Theme Installation Steps
+1. Upload the theme to `/home/redmine/redmine/themes/`
+2. Ensure the theme directory has the correct ownership: `chown -R redmine:redmine /home/redmine/redmine/themes/`
+3. Restart Redmine: `touch /home/redmine/redmine/tmp/restart.txt && chown redmine:redmine /home/redmine/redmine/tmp/restart.txt`
+4. In Redmine, go to Administration → Settings → Display and select your theme
+
 ## License
 This project is licensed under the MIT License - see the LICENSE file for details.
 
